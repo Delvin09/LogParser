@@ -1,6 +1,7 @@
-﻿--CREATE DATABASE [LogDatabase];
---GO
---DROP TABLE [Log];
+﻿CREATE DATABASE [LogDatabase];
+GO
+USE [LogDatabase];
+GO
 CREATE TABLE [Log] (
     Id int PRIMARY KEY IDENTITY(1, 1),
     RequestDateTime DATETIME NOT NULL,
@@ -10,4 +11,8 @@ CREATE TABLE [Log] (
     [ResultCode] INT NOT NULL,
     [ResponseSize] INT NOT NULL,
     [Geolocation] NVARCHAR(MAX)
-)
+);
+GO
+CREATE NONCLUSTERED INDEX [HostIndex] ON [dbo].[Log] ([Host]);
+GO
+CREATE NONCLUSTERED INDEX [RequestDateTimeIndex] ON [dbo].[Log] ([RequestDateTime]);
