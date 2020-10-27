@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
@@ -21,25 +23,26 @@ namespace LogParser
             _logger = logger;
         }
 
-        public void Lookup()
+        public async Task Lookup()
         {
             var stopwatch = Stopwatch.StartNew();
-            _logger.LogInformation($"Start lookup geolocation.");
+            _logger.LogInformation($"Start lookup geolocation at {DateTime.Now}.");
 
-            var origin = _logRepository.GetHostsWithoutLocation();
+            var origin = await _logRepository.GetHostsWithoutLocation();
             IEnumerable<HostInfo> tail = origin;
             foreach (var provider in _providers)
             {
                 if (!tail.Any())
                     break;
 
-                tail = provider.Lookup(tail);
+                tail = await provider.Lookup(tail);
             }
+
             _logger.LogDebug("Store geolocation data in db.");
-            _logRepository.UpdateGeolocations(origin.Where(h => !string.IsNullOrEmpty(h.Geolocation)));
+            await _logRepository.UpdateGeolocations(origin.Where(h => !string.IsNullOrEmpty(h.Geolocation)));
 
             stopwatch.Stop();
-            _logger.LogInformation($"End lookup geolocation. Elapsed: {stopwatch.Elapsed}. Remaining tail: {tail.Count()}");
+            _logger.LogInformation($"End lookup geolocation at {DateTime.Now}. Elapsed: {stopwatch.Elapsed}. Remaining tail: {tail.Count()}");
         }
     }
 }

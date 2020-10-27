@@ -1,5 +1,6 @@
 ﻿using Common;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
@@ -7,6 +8,6 @@ namespace LogParser
     {
         int Priority { get; }
 
-        IEnumerable<HostInfo> Lookup(IEnumerable<HostInfo> hosts);
+        Task<IEnumerable<HostInfo>> Lookup(IEnumerable<HostInfo> hosts);
     }
 }

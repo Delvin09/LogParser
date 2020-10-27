@@ -1,7 +1,9 @@
-﻿namespace LogParser
+﻿using System.Threading.Tasks;
+
+namespace LogParser
 {
     public interface ILogParser
     {
-        void Parse();
+        Task Parse();
     }
 }

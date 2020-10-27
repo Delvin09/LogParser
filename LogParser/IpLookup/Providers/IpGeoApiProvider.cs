@@ -1,7 +1,9 @@
 ﻿using Common;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RestSharp;
 using System;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
@@ -12,8 +14,8 @@ namespace LogParser
 
         public override int Priority => 1;
 
-        public IpGeoApiProvider(ILogger<IpGeoApiProvider> logger)
-            : base(logger)
+        public IpGeoApiProvider(ILogger<IpGeoApiProvider> logger, IConfiguration configuration)
+            : base(logger, configuration)
         {
             _client = new RestClient
             {
@@ -21,29 +23,46 @@ namespace LogParser
             };
         }
 
-        protected override void LookupInner(HostInfo record)
+        protected override async Task LookupInner(HostInfo record)
         {
-            var request = new RestRequest();
-            var ip = GetIp(record.Host);
+            var ip = await GetIp(record.Host);
             if (ip == null)
             {
+                record.Geolocation = NotFound;
                 _logger.LogTrace($"Skipped host `{record.Host}` - IP address not found.");
                 return;
             }
 
+            var request = new RestRequest();
             request.AddUrlSegment("IpAddress", ip);
             request.Resource = "{IpAddress}";
-            var response = _client.Execute<dynamic>(request, Method.GET);
+            var response = await _client.ExecuteTaskAsync<dynamic>(request, Method.GET);
             if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
             {
-                _logger.LogTrace($"Skipped host `{record.Host}` - response returned code {response.StatusCode}.");
+                _logger.LogError($"Response returned code {response.StatusCode} for host {record.Host} with IP {ip}.");
                 return;
+            }
+            if (response.StatusCode <= 0)
+            {
+                throw new ApplicationException($"An unexpected error occurred on the server side. IP = `{ip}`", response.ErrorException);
             }
             if ((int)response.StatusCode >= 500 || response.ErrorException != null)
             {
-                throw new ApplicationException(string.IsNullOrEmpty(response.ErrorMessage) ? "An unexpected error occurred on the server side." : response.ErrorMessage, response.ErrorException);
+                _logger.LogWarning(response.ErrorException, $"An unexpected error occurred on the server side. IP = `{ip}`");
+                record.Geolocation = NotFound;
+                return;
             }
-            record.Geolocation = response.Data["name"];
+
+            try
+            {
+                string country = response.Data["name"];
+                record.Geolocation = string.IsNullOrEmpty(country) ? NotFound : country;
+            }
+            catch (Exception ex)
+            {
+                record.Geolocation = NotFound;
+                _logger.LogWarning(ex, $"An unexpected error occurred when responce processed. IP = `{ip}`");
+            }
         }
     }
 }

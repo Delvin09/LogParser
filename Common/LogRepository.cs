@@ -7,6 +7,7 @@ using Dapper;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace Common
 {
@@ -41,11 +42,11 @@ namespace Common
             }
         }
 
-        public IEnumerable<HostInfo> GetHostsWithoutLocation()
+        public async Task<IEnumerable<HostInfo>> GetHostsWithoutLocation()
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                return connection.Query<HostInfo>("SELECT DISTINCT Host FROM [Log] WHERE Geolocation IS NULL");
+                return await connection.QueryAsync<HostInfo>("SELECT DISTINCT Host FROM [Log] WHERE Geolocation IS NULL");
             }
         }
 
@@ -77,20 +78,23 @@ FETCH NEXT @limit ROWS ONLY", new { offset, limit, start, end });
             return $"WHERE {additionalCodition} l.RequestDateTime BETWEEN @start AND @end";
         }
 
-        public void Insert(IEnumerable<LogRecord> records)
+        public async Task AddLogs(IEnumerable<LogRecord> records)
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                connection.Execute("INSERT [Log] VALUES (@RequestDateTime, @Host, @Route, @QueryParameters, @ResultCode, @ResponseSize, @Geolocation)"
-                    , records);
+                connection.Open();
+                var transaction = connection.BeginTransaction();
+                await connection.ExecuteAsync("INSERT [Log] VALUES (@RequestDateTime, @Host, @Route, @QueryParameters, @ResultCode, @ResponseSize, @Geolocation)"
+                    , records, transaction);
+                transaction.Commit();
             }
         }
 
-        public void UpdateGeolocations(IEnumerable<HostInfo> hostInfos)
+        public async Task UpdateGeolocations(IEnumerable<HostInfo> hostInfos)
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                connection.Execute("UPDATE [Log] SET Geolocation = @Geolocation WHERE Host = @Host", hostInfos);
+                await connection.ExecuteAsync("UPDATE [Log] SET Geolocation = @Geolocation WHERE Host = @Host", hostInfos);
             }
         }
     }

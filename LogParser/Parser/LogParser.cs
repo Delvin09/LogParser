@@ -8,6 +8,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
@@ -18,90 +19,123 @@ namespace LogParser
         private readonly int _bufferSize;
         private readonly ILogger<LogParser> _logger;
         private readonly ILogRepository _logRepository;
-        private readonly IIpLookupService _ipLookupService;
 
-        public LogParser(IConfiguration configuration, ILogRepository logRepository, IIpLookupService ipLookupService, ILogger<LogParser> logger)
+        public LogParser(IConfiguration configuration, ILogRepository logRepository, ILogger<LogParser> logger)
         {
             _filePath = configuration["filePath"] ?? throw new ArgumentNullException(nameof(_filePath));
             _bufferSize = !string.IsNullOrEmpty(configuration["bufferSize"])
                     ? int.Parse(configuration["bufferSize"])
                     : 100000;
 
+            if (_bufferSize <= 0)
+                throw new ArgumentException($"{nameof(_bufferSize)} can't be equal or less than 0.");
+
             _logger = logger;
             _logRepository = logRepository;
-            _ipLookupService = ipLookupService;
         }
 
-        public void Parse()
+        public async Task Parse()
         {
             _logger.LogInformation($"Start parsing at {DateTime.Now}");
             var stopWatch = Stopwatch.StartNew();
 
-            var result = new List<LogRecord>();
-
             using var reader = File.OpenText(_filePath);
             var buffer = new LogRecord[_bufferSize];
+            var insertTask = Task.CompletedTask;
             while (!reader.EndOfStream) {
 
                 _logger.LogTrace($"Start parse block. Position: {reader.BaseStream.Position}");
                 var count = ParseBlock(reader, buffer);
                 _logger.LogTrace($"End parse block. Position: {reader.BaseStream.Position}; count: {count}");
 
-                _logRepository.Insert(buffer.Take(count));
-                _logger.LogTrace("Added to result");
+                await insertTask;
+                _logger.LogTrace("Add parsing result to database");
+                insertTask = _logRepository.AddLogs(buffer.Take(count).ToArray());
             }
 
             stopWatch.Stop();
             _logger.LogInformation($"End parsing at {DateTime.Now}; Elapsed: {stopWatch.Elapsed}");
         }
 
-        private int ParseBlock([NotNull] StreamReader reader, [NotNull] LogRecord[] buffer)
+        private int ParseBlock(StreamReader reader, LogRecord[] buffer)
         {
-            if (reader == null)
-                throw new ArgumentNullException(nameof(reader));
-            if (buffer == null || buffer.Length == 0)
-                throw new ArgumentNullException(nameof(buffer));
-
             int index = 0;
             for (; !reader.EndOfStream && index < buffer.Length;)
             {
                 var line = reader.ReadLine();
                 _logger.LogTrace($"Parsing line: `{line}`.");
 
-                var segments = line.Split(new string[] { " - - ", "[", "]" }, StringSplitOptions.RemoveEmptyEntries);
-                if (segments.Length != 3)
+                var segments = line.Split(new string[] { " - - " }, StringSplitOptions.RemoveEmptyEntries);
+                if (segments.Length != 2)
                 {
                     _logger.LogWarning($"Invalid line format: `{line}`. Skipped.");
                     continue;
                 }
 
                 var record = new LogRecord();
-                if (!ParseRequestResponsePart(segments[2], record))
+
+                if (!TryParseTimeAndRoutePart(segments[1], record))
+                {
+                    _logger.LogTrace($"Skipped line: `{line}`. Wrong format.");
                     continue;
+                }
 
                 record.Host = segments[0];
-                record.RequestDateTime = DateTime.ParseExact(segments[1], "dd/MMM/yyyy:HH:mm:ss zzz", CultureInfo.InvariantCulture);
                 buffer[index++] = record;
             }
 
             return index + 1;
         }
 
-        private bool ParseRequestResponsePart(string linePart, LogRecord record)
+        private bool TryParseTimeAndRoutePart(ReadOnlySpan<char> segment, LogRecord record)
+        {
+            var timeSegment = ParseTimePart(segment, out int start);
+            if (start >= 0 && start + 1 < segment.Length)
+                segment = segment.Slice(start + 1);
+            else
+                return false;
+
+            if (!ParseRequestResponsePart(segment, record))
+                return false;
+
+            record.RequestDateTime = DateTime.ParseExact(timeSegment, "dd/MMM/yyyy:HH:mm:ss zzz", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private ReadOnlySpan<char> ParseTimePart(ReadOnlySpan<char> segment, out int end)
+        {
+            end = -1;
+
+            var start = segment.IndexOf('[');
+            if (start >= 0 && start + 1 < segment.Length)
+                segment = segment.Slice(start + 1);
+            else
+                return ReadOnlySpan<char>.Empty;
+
+            end = segment.IndexOf(']');
+            if (end > 0 && end <= segment.Length)
+                segment = segment.Slice(0, end);
+            else
+                return ReadOnlySpan<char>.Empty;
+
+            return segment;
+        }
+
+        private bool ParseRequestResponsePart(ReadOnlySpan<char> linePart, LogRecord record)
         {
             int start = linePart.IndexOf('"');
             int end = linePart.LastIndexOf('"');
 
             if (start < 0 || end < 0 || end <= start)
             {
-                _logger.LogError($"Can't parse line {linePart} - didn't find Request segment (`\"`)");
+                _logger.LogError($"Can't parse line {linePart.ToString()} - didn't find Request segment (`\"`)");
                 return false;
             }
 
-            if (!ParseRoute(linePart.AsSpan(start + 1, end - start - 1), record))
+            if (!ParseRoute(linePart.Slice(start + 1, end - start - 1), record))
                 return false;
 
-            ParseResponse(linePart.AsSpan(end + 2), record);
+            ParseResponse(linePart.Slice(end + 2), record);
             return true;
         }
 

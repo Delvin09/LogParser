@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
@@ -12,12 +13,14 @@ namespace LogParser
         private readonly ILogParser _logParser;
         private readonly ILogger<Application> _logger;
         private readonly IIpLookupService _ipLookupService;
+        private readonly IConfiguration _configuration;
 
-        public Application(ILogParser logParser, IIpLookupService ipLookupService, ILogger<Application> logger)
+        public Application(ILogParser logParser, IIpLookupService ipLookupService, IConfiguration configuration, ILogger<Application> logger)
         {
             _logParser = logParser;
             _logger = logger;
             _ipLookupService = ipLookupService;
+            _configuration = configuration;
         }
 
         public static Application Create(string[] args)
@@ -46,12 +49,12 @@ namespace LogParser
                 .AddCommandLine(args)
                 .Build();
 
-        public void Run()
+        public async Task Run()
         {
             try
             {
-                _logParser.Parse();
-                _ipLookupService.Lookup();
+                if (_configuration.GetValue("ParseOn", true)) await _logParser.Parse();
+                if (_configuration.GetValue("IpLookupOn", true)) await _ipLookupService.Lookup();
             }
             catch (Exception ex)
             {

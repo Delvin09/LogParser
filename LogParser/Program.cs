@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace LogParser
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
-            Application.Create(args)
+            await Application.Create(args)
                 .Run();
         }
     }
